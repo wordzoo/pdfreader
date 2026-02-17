@@ -1,1 +1,1 @@
-java -jar target\stave-reader-1.0.0.jar "C:\BWV 915.pdf"
+c:\jdk-17\bin\java -jar target\stave-reader-1.0.0.jar "C:\BWV 915.pdf"
