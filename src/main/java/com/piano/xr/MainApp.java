@@ -8,8 +8,11 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
-import javafx.scene.layout.BorderPane;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -30,48 +33,62 @@ public class MainApp extends Application {
     private ScrollPane scrollPane;
     private ImageView pdfImageView;
     private StackPane rootLayout;
+    private ImageView standView;
+    private Stage primaryStage;
 
     @Override
     public void start(Stage stage) throws Exception {
-        String pdfPath = getParameters().getRaw().get(0);
-        document = PDDocument.load(new File(pdfPath));
-        renderer = new PDFRenderer(document);
-
-        // 1. Setup ScrollPane for the PDF content
+        this.primaryStage = stage;
+        String pdfPath = getParameters().getRaw().isEmpty() ? null : getParameters().getRaw().get(0);
+        
+        rootLayout = new StackPane();
+        
+        // 1. Initialize ScrollPane
         scrollPane = new ScrollPane();
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setStyle("-fx-background-color:transparent; -fx-background: transparent;");
+        // This ensures the ScrollPane content is centered if it's smaller than the viewport
+        scrollPane.setFitToWidth(true); 
+        scrollPane.setStyle("-fx-background-color:transparent; -fx-background: transparent; -fx-border-color: transparent;");
 
-        // Load the initial page data
-        loadPage(0);
+        double screenHeight = Screen.getPrimary().getBounds().getHeight();
+        scrollPane.setMaxHeight(screenHeight / 3.0);
+        scrollPane.setPrefHeight(screenHeight / 3.0);
 
-        // 2. Main container that holds both music and the wooden frame
-        rootLayout = new StackPane(scrollPane);
+        if (pdfPath != null) {
+            loadNewPDF(new File(pdfPath));
+        }
+
+        applyBaroqueBackground(rootLayout);
         
-        // 3. Apply the wooden "Baroque" overlay
-        applyBaroqueFrame(rootLayout);
+        // 2. Add the ScrollPane to the center of the StackPane
+        rootLayout.getChildren().add(scrollPane);
+        StackPane.setAlignment(scrollPane, Pos.CENTER);
 
-        // Calculate dynamic height based on the first stave detected
-        double initialStaveHeight = (systemTops.size() > 1) ? (systemTops.get(1) - systemTops.get(0)) : 450;
+        Scene scene = new Scene(rootLayout);
         
-        // Window width = PDF width + side wood space
-        Scene scene = new Scene(rootLayout, pdfImageView.getImage().getWidth() + 260, initialStaveHeight + 160);
-
-        stage.initStyle(javafx.stage.StageStyle.UNDECORATED);
-        stage.setAlwaysOnTop(true);
-
-        // Listen for keyboard/pedal (Down Arrow/Space) to move to the next system or page
         scene.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.DOWN || event.getCode() == KeyCode.SPACE) {
-                jumpToNext();
-            } else if (event.getCode() == KeyCode.ESCAPE) {
-                stage.close();
-            }
+            if (event.getCode() == KeyCode.DOWN || event.getCode() == KeyCode.SPACE) jumpToNext();
+            else if (event.getCode() == KeyCode.UP) jumpToPrevious();
+            else if (event.getCode() == KeyCode.ESCAPE) stage.close();
         });
 
         stage.setScene(scene);
+        stage.setFullScreen(true);
+        stage.setFullScreenExitHint(""); 
+        stage.setAlwaysOnTop(true);
         stage.show();
+    }
+
+    private void loadNewPDF(File file) {
+        try {
+            if (document != null) document.close();
+            document = PDDocument.load(file);
+            renderer = new PDFRenderer(document);
+            loadPage(0);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void loadPage(int pageIndex) {
@@ -80,13 +97,38 @@ public class MainApp extends Application {
             systemTops = findSystems(bImage);
             pdfImageView = new ImageView(SwingFXUtils.toFXImage(bImage, null));
             pdfImageView.setPreserveRatio(true);
-            scrollPane.setContent(pdfImageView);
+            
+            double screenWidth = Screen.getPrimary().getBounds().getWidth();
+            pdfImageView.setFitWidth(screenWidth - 450); 
 
+            pdfImageView.setOnMouseClicked(event -> {
+                if (event.getButton() == MouseButton.PRIMARY) {
+                    openFilePicker();
+                }
+            });
+
+            // 3. FIX: Wrap ImageView in a VBox to force centering within the ScrollPane
+            VBox centeringWrapper = new VBox(pdfImageView);
+            centeringWrapper.setAlignment(Pos.CENTER);
+            centeringWrapper.setStyle("-fx-background-color: transparent;");
+            
+            scrollPane.setContent(centeringWrapper);
+            
             currentPage = pageIndex;
             currentSystemIndex = 0;
             scrollToSystem(0);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private void openFilePicker() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Sheet Music PDF");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PDF Files", "*.pdf"));
+        File selectedFile = fileChooser.showOpenDialog(primaryStage);
+        if (selectedFile != null) {
+            loadNewPDF(selectedFile);
         }
     }
 
@@ -99,44 +141,40 @@ public class MainApp extends Application {
         }
     }
 
-    private void scrollToSystem(int index) {
-        double imageHeight = pdfImageView.getImage().getHeight();
-        double viewportHeight = scrollPane.getViewportBounds().getHeight();
-        if (imageHeight > viewportHeight) {
-            scrollPane.setVvalue((double) systemTops.get(index) / (imageHeight - viewportHeight));
+    private void jumpToPrevious() {
+        if (currentSystemIndex > 0) {
+            currentSystemIndex--;
+            scrollToSystem(currentSystemIndex);
+        } else if (currentPage > 0) {
+            loadPage(currentPage - 1);
+            currentSystemIndex = systemTops.size() - 1; 
+            scrollToSystem(currentSystemIndex);
         }
     }
 
-    private void applyBaroqueFrame(StackPane root) {
+    private void scrollToSystem(int index) {
+        double imageHeight = pdfImageView.getImage().getHeight();
+        double viewportHeight = scrollPane.getHeight();
+        if (imageHeight > viewportHeight) {
+            // Calculate scroll based on the image's height within the wrapper
+            double scrollPos = (double) systemTops.get(index) / (imageHeight - viewportHeight);
+            scrollPane.setVvalue(scrollPos);
+        }
+    }
+
+    private void applyBaroqueBackground(StackPane root) {
         try {
-            // Load custom wooden assets from src/main/resources
-            ImageView leftS = new ImageView(new Image(getClass().getResourceAsStream("/left_scroll.png")));
-            ImageView rightS = new ImageView(new Image(getClass().getResourceAsStream("/right_scroll.png")));
-            ImageView topWood = new ImageView(new Image(getClass().getResourceAsStream("/top_bar.jpg")));
-            ImageView bottomWood = new ImageView(new Image(getClass().getResourceAsStream("/bottom_ledge.jpg")));
-
-            // Scale side "S" scrolls to frame the music
-            leftS.setPreserveRatio(true); leftS.setFitHeight(500);
-            rightS.setPreserveRatio(true); rightS.setFitHeight(500);
-
-            // Set horizontal bars to span the window width
-            topWood.setFitWidth(2000); topWood.setPreserveRatio(false); topWood.setFitHeight(40);
-            bottomWood.setFitWidth(2000); bottomWood.setPreserveRatio(false); bottomWood.setFitHeight(80);
-
-            // Overlay layout using BorderPane
-            BorderPane frameOverlay = new BorderPane();
-            frameOverlay.setLeft(leftS);
-            frameOverlay.setRight(rightS);
-            frameOverlay.setTop(topWood);
-            frameOverlay.setBottom(bottomWood);
+            Image standImg = new Image(getClass().getResourceAsStream("/music_stand_bg.jpg"));
+            standView = new ImageView(standImg);
+            standView.setPreserveRatio(true); 
+            standView.fitWidthProperty().bind(root.widthProperty());
             
-            // Critical for usability: ignore mouse clicks on wood so music can still be scrolled/interacted with
-            frameOverlay.setPickOnBounds(false); 
+            if (root.getChildren().isEmpty()) root.getChildren().add(standView);
+            else root.getChildren().add(0, standView);
             
-            root.getChildren().add(frameOverlay);
-            root.setStyle("-fx-background-color: #2b1d12;"); // Fills gaps with dark mahogany color
+            root.setStyle("-fx-background-color: black;");
         } catch (Exception e) {
-            System.err.println("Error: Images must be in src/main/resources. " + e.getMessage());
+            System.err.println("Background error: " + e.getMessage());
         }
     }
 
@@ -148,7 +186,6 @@ public class MainApp extends Application {
         int whiteSpaceCounter = 0;
         boolean inSystem = false;
 
-        // Scan Y-axis for horizontal black pixel density (staves)
         for (int y = 0; y < height; y++) {
             int blackPixels = 0;
             for (int x = 0; x < width; x++) {
