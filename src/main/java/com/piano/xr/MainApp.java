@@ -29,9 +29,7 @@ import java.util.List;
 
 public class MainApp extends Application {
     
-    // STEP 1: Viewport Height Configuration
-    // private final double VIEWPORT_HEIGHT_RATIO = 3.0; // Old height (1/3 screen)
-    private final double VIEWPORT_HEIGHT_RATIO = 1.0;    // New height (Full screen)
+    private final double VIEWPORT_HEIGHT_RATIO = 1.0; 
 
     static { 
         try { OpenCV.loadLocally(); } catch (Throwable e) { OpenCV.loadShared(); }
@@ -41,7 +39,7 @@ public class MainApp extends Application {
     private PDFRenderer renderer;
     private int currentPage = -1;
     private int currentSystemIndex = 0;
-    private List<Integer> systemTops = new ArrayList<>();
+    private List<Integer> systemSnaps = new ArrayList<>();
 
     private ScrollPane scrollPane;
     private ImageView pdfImageView;
@@ -90,17 +88,12 @@ public class MainApp extends Application {
     private void loadPage(int pageIndex, boolean jumpToTop) {
         try {
             currentPage = pageIndex;
-            // 150 DPI provides a good balance between detail and processing speed
             BufferedImage bImage = renderer.renderImageWithDPI(pageIndex, 150);
             
             Mat source = bufferedImageToMat(bImage);
-            systemTops = findSystemsViaHough(source);
+            systemSnaps = findSystemsViaNeighborhood(source);
             
-            if (systemTops.isEmpty()) {
-                systemTops.add(100); 
-            }
-            
-            System.out.println("Page " + pageIndex + ": Detected " + systemTops.size() + " systems.");
+            if (systemSnaps.isEmpty()) systemSnaps.add(100);
 
             pdfImageView = new ImageView(SwingFXUtils.toFXImage(matToBufferedImage(source), null));
             pdfImageView.setPreserveRatio(true);
@@ -108,11 +101,10 @@ public class MainApp extends Application {
 
             VBox wrapper = new VBox(pdfImageView);
             wrapper.setAlignment(Pos.CENTER);
-            // Large bottom padding allows the last system on the page to be scrolled to the top
             wrapper.setPadding(new Insets(0, 0, Screen.getPrimary().getBounds().getHeight(), 0));
             
             scrollPane.setContent(wrapper);
-            currentSystemIndex = jumpToTop ? 0 : systemTops.size() - 1;
+            currentSystemIndex = jumpToTop ? 0 : systemSnaps.size() - 1;
             
             Platform.runLater(() -> scrollToSystem(currentSystemIndex));
             source.release();
@@ -121,12 +113,9 @@ public class MainApp extends Application {
 
     private List<Integer> findSystemsViaNeighborhood(Mat source) {
         List<Integer> snaps = new ArrayList<>();
-        
-        // EXPLICIT TOP SNAP: Always start at the top of the page
-        snaps.add(10); 
-
         Mat gray = new Mat();
         Mat thresh = new Mat();
+        
         Imgproc.cvtColor(source, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.threshold(gray, thresh, 200, 255, Imgproc.THRESH_BINARY_INV);
 
@@ -134,7 +123,6 @@ public class MainApp extends Application {
         int cols = thresh.cols();
         int bandSize = 5;
         
-        // Generate Density Profile
         List<Double> densities = new ArrayList<>();
         for (int y = 0; y < rows - bandSize; y += bandSize) {
             double bandSum = 0;
@@ -148,7 +136,6 @@ public class MainApp extends Application {
             densities.add(bandSum / bandSize);
         }
 
-        // Neighborhood Search for Troughs
         int searchRadius = 50; 
         int ignoreBands = (int)((rows * 0.10) / bandSize);
 
@@ -163,19 +150,13 @@ public class MainApp extends Application {
                 }
             }
 
-            // Snap to the center of the whitest troughs
             if (isLocalMin && currentDensity < 0.05) {
                 int snapY = i * bandSize;
-                // Ensure we aren't doubling up on the top snap or previous markers
-                if (snapY - snaps.get(snaps.size()-1) > 250) {
+                if (snaps.isEmpty() || snapY - snaps.get(snaps.size()-1) > 200) {
+                    Imgproc.line(source, new Point(0, snapY), new Point(cols, snapY), new Scalar(255, 0, 0), 4);
                     snaps.add(snapY);
                 }
             }
-        }
-
-        // DRAWING: Only blue lines in the troughs
-        for (Integer yPos : snaps) {
-            Imgproc.line(source, new Point(0, yPos), new Point(cols, yPos), new Scalar(255, 0, 0), 4);
         }
 
         gray.release(); thresh.release();
@@ -183,21 +164,16 @@ public class MainApp extends Application {
     }
 
     private void scrollToSystem(int index) {
-        if (scrollPane.getContent() == null || systemTops.isEmpty()) return;
-        
+        if (scrollPane.getContent() == null || systemSnaps.isEmpty()) return;
         double vH = scrollPane.getHeight();
         double cH = scrollPane.getContent().getBoundsInLocal().getHeight();
-        double targetY = systemTops.get(index);
-        
-        // Offset to keep the system slightly below the top of the viewport
-        double offset = vH * 0.10;
-        double scrollPos = (targetY - offset) / (cH - vH);
-        
+        double targetY = systemSnaps.get(index);
+        double scrollPos = (targetY - (vH / 2.0)) / (cH - vH);
         scrollPane.setVvalue(Math.max(0, Math.min(1.0, scrollPos)));
     }
 
     private void jumpToNext() {
-        if (currentSystemIndex < systemTops.size() - 1) {
+        if (currentSystemIndex < systemSnaps.size() - 1) {
             currentSystemIndex++;
             scrollToSystem(currentSystemIndex);
         } else if (currentPage < document.getNumberOfPages() - 1) {
