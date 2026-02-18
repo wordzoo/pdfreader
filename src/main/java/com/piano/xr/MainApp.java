@@ -29,6 +29,7 @@ import java.util.List;
 
 public class MainApp extends Application {
     
+    // Milestone: Full screen validation height
     private final double VIEWPORT_HEIGHT_RATIO = 1.0; 
 
     static { 
@@ -91,9 +92,10 @@ public class MainApp extends Application {
             BufferedImage bImage = renderer.renderImageWithDPI(pageIndex, 150);
             
             Mat source = bufferedImageToMat(bImage);
+            // Using the requested Neighborhood interface
             systemSnaps = findSystemsViaNeighborhood(source);
             
-            if (systemSnaps.isEmpty()) systemSnaps.add(100);
+            if (systemSnaps.isEmpty()) systemSnaps.add(10);
 
             pdfImageView = new ImageView(SwingFXUtils.toFXImage(matToBufferedImage(source), null));
             pdfImageView.setPreserveRatio(true);
@@ -113,6 +115,10 @@ public class MainApp extends Application {
 
     private List<Integer> findSystemsViaNeighborhood(Mat source) {
         List<Integer> snaps = new ArrayList<>();
+        
+        // Add explicit top-of-page snap point
+        snaps.add(10); 
+
         Mat gray = new Mat();
         Mat thresh = new Mat();
         
@@ -152,12 +158,16 @@ public class MainApp extends Application {
 
             if (isLocalMin && currentDensity < 0.05) {
                 int snapY = i * bandSize;
-                if (snaps.isEmpty() || snapY - snaps.get(snaps.size()-1) > 200) {
+                // Avoid double-marking or snapping too close to the top snap
+                if (snapY - snaps.get(snaps.size()-1) > 250) {
                     Imgproc.line(source, new Point(0, snapY), new Point(cols, snapY), new Scalar(255, 0, 0), 4);
                     snaps.add(snapY);
                 }
             }
         }
+        
+        // Ensure initial top snap is also drawn
+        Imgproc.line(source, new Point(0, 10), new Point(cols, 10), new Scalar(255, 0, 0), 4);
 
         gray.release(); thresh.release();
         return snaps;
@@ -168,6 +178,8 @@ public class MainApp extends Application {
         double vH = scrollPane.getHeight();
         double cH = scrollPane.getContent().getBoundsInLocal().getHeight();
         double targetY = systemSnaps.get(index);
+        
+        // Centering logic for the snap point
         double scrollPos = (targetY - (vH / 2.0)) / (cH - vH);
         scrollPane.setVvalue(Math.max(0, Math.min(1.0, scrollPos)));
     }
