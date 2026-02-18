@@ -1,1 +1,18 @@
-"/target/" 
+# Maven build output
+/target/
+
+# All JAR files in any directory
+**/*.jar
+
+# IDE files (Eclipse/IntelliJ/VS Code)
+.settings/
+.project
+.classpath
+.bin/
+.idea/
+*.iml
+*.iws
+
+# OS specific
+.DS_Store
+Thumbs.db

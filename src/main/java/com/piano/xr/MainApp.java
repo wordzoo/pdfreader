@@ -7,12 +7,10 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.stage.FileChooser;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -22,17 +20,19 @@ import org.opencv.core.*;
 import org.opencv.imgproc.Imgproc;
 import nu.pattern.OpenCV;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.io.File;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public class MainApp extends Application {
     
+    // STEP 1: Viewport Height Configuration
+    // private final double VIEWPORT_HEIGHT_RATIO = 3.0; // Old height (1/3 screen)
+    private final double VIEWPORT_HEIGHT_RATIO = 1.0;    // New height (Full screen)
+
     static { 
         try { OpenCV.loadLocally(); } catch (Throwable e) { OpenCV.loadShared(); }
     }
@@ -42,40 +42,23 @@ public class MainApp extends Application {
     private int currentPage = -1;
     private int currentSystemIndex = 0;
     private List<Integer> systemTops = new ArrayList<>();
-    private Mat clefTemplate;
 
     private ScrollPane scrollPane;
     private ImageView pdfImageView;
-    private Stage primaryStage;
 
     @Override
     public void start(Stage stage) throws Exception {
-        this.primaryStage = stage;
-        
-        // Load the anchor image from resources
-        try (InputStream is = getClass().getResourceAsStream("/treble_clef_anchor.png")) {
-            if (is != null) {
-                BufferedImage bi = ImageIO.read(is);
-                clefTemplate = bufferedImageToMat(bi);
-                Imgproc.cvtColor(clefTemplate, clefTemplate, Imgproc.COLOR_BGR2GRAY);
-            }
-        }
-
         StackPane rootLayout = new StackPane();
         scrollPane = new ScrollPane();
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setFitToWidth(true);
-        // Make the scrollpane transparent to see the baroque background
-        scrollPane.setStyle("-fx-background-color:transparent; -fx-background: transparent; -fx-border-color: transparent;");
+        scrollPane.setStyle("-fx-background-color:transparent; -fx-background: transparent;");
 
         double screenHeight = Screen.getPrimary().getBounds().getHeight();
-        scrollPane.setMaxHeight(screenHeight / 3.0);
-        scrollPane.setPrefHeight(screenHeight / 3.0);
+        scrollPane.setMaxHeight(screenHeight / VIEWPORT_HEIGHT_RATIO);
+        scrollPane.setPrefHeight(screenHeight / VIEWPORT_HEIGHT_RATIO);
 
-        // Apply the background image
-        applyBaroqueBackground(rootLayout);
-        
         rootLayout.getChildren().add(scrollPane);
         StackPane.setAlignment(scrollPane, Pos.CENTER);
 
@@ -88,7 +71,6 @@ public class MainApp extends Application {
 
         stage.setScene(scene);
         stage.setFullScreen(true);
-        stage.setFullScreenExitHint("");
         stage.setAlwaysOnTop(true);
         stage.show();
 
@@ -108,28 +90,26 @@ public class MainApp extends Application {
     private void loadPage(int pageIndex, boolean jumpToTop) {
         try {
             currentPage = pageIndex;
+            // 150 DPI provides a good balance between detail and processing speed
             BufferedImage bImage = renderer.renderImageWithDPI(pageIndex, 150);
             
             Mat source = bufferedImageToMat(bImage);
-            // Search across multiple scales to handle varying PDF sizes
-            systemTops = findClefsRobust(source);
+            systemTops = findSystemsViaHough(source);
             
-            // Marker for Page 1 Title
-            if (pageIndex == 0 && (systemTops.isEmpty() || systemTops.get(0) > 200)) {
-                systemTops.add(0, 100); 
+            if (systemTops.isEmpty()) {
+                systemTops.add(100); 
             }
-            Collections.sort(systemTops);
             
-            System.out.println("Page " + pageIndex + ": Found " + systemTops.size() + " systems.");
+            System.out.println("Page " + pageIndex + ": Detected " + systemTops.size() + " systems.");
 
             pdfImageView = new ImageView(SwingFXUtils.toFXImage(matToBufferedImage(source), null));
             pdfImageView.setPreserveRatio(true);
-            pdfImageView.setFitWidth(Screen.getPrimary().getBounds().getWidth() - 450);
+            pdfImageView.setFitWidth(Screen.getPrimary().getBounds().getWidth() - 400);
 
             VBox wrapper = new VBox(pdfImageView);
             wrapper.setAlignment(Pos.CENTER);
-            // Pad bottom so the final stave of the page can be centered
-            wrapper.setPadding(new Insets(0, 0, Screen.getPrimary().getBounds().getHeight() / 2.0, 0));
+            // Large bottom padding allows the last system on the page to be scrolled to the top
+            wrapper.setPadding(new Insets(0, 0, Screen.getPrimary().getBounds().getHeight(), 0));
             
             scrollPane.setContent(wrapper);
             currentSystemIndex = jumpToTop ? 0 : systemTops.size() - 1;
@@ -139,58 +119,80 @@ public class MainApp extends Application {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    private List<Integer> findClefsRobust(Mat source) {
-        List<Integer> yCoords = new ArrayList<>();
-        if (clefTemplate == null) return yCoords;
-
+    private List<Integer> findSystemsViaHough(Mat source) {
+        List<Integer> snapPoints = new ArrayList<>();
         Mat gray = new Mat();
-        Imgproc.cvtColor(source, gray, Imgproc.COLOR_BGR2GRAY);
-
-        // Scan 5 different scales to find the best fit
-        double[] scales = {0.6, 0.8, 1.0, 1.2, 1.4};
+        Mat thresh = new Mat();
         
-        for (double scale : scales) {
-            Mat resT = new Mat();
-            Imgproc.resize(clefTemplate, resT, new Size(0, 0), scale, scale, Imgproc.INTER_LINEAR);
-            
-            Mat result = new Mat();
-            Imgproc.matchTemplate(gray, resT, result, Imgproc.TM_CCOEFF_NORMED);
+        Imgproc.cvtColor(source, gray, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.threshold(gray, thresh, 200, 255, Imgproc.THRESH_BINARY_INV);
 
-            // Use 0.50 threshold to catch varied ink weights
-            double threshold = 0.50; 
-            for (int y = 0; y < result.rows(); y++) {
-                for (int x = 0; x < result.cols(); x++) {
-                    if (x < gray.cols() * 0.12) {
-                        if (result.get(y, x)[0] > threshold) {
-                            int centerY = y + (resT.rows() / 2);
-                            boolean duplicate = false;
-                            for (int existingY : yCoords) {
-                                if (Math.abs(existingY - centerY) < 200) duplicate = true;
-                            }
-                            if (!duplicate) {
-                                yCoords.add(centerY);
-                                // Draw red box on the music to see what the AI found
-                                Imgproc.rectangle(source, new Point(x, y), 
-                                    new Point(x + resT.cols(), y + resT.rows()), new Scalar(0,0,255), 3);
-                            }
-                        }
-                    }
+        int rows = thresh.rows();
+        int cols = thresh.cols();
+        int bandSize = 5;
+        
+        List<Double> densities = new ArrayList<>();
+        for (int y = 0; y < rows - bandSize; y += bandSize) {
+            double bandSum = 0;
+            for (int i = 0; i < bandSize; i++) {
+                double rowSum = 0;
+                for (int x = 0; x < cols; x++) {
+                    if (thresh.get(y + i, x)[0] > 0) rowSum++;
+                }
+                bandSum += (rowSum / cols);
+            }
+            densities.add(bandSum / bandSize);
+        }
+
+        // STEP 2: Find the "Global" Minimums
+        // We search for troughs but only keep the one that is the "whitiest"
+        // in its immediate neighborhood (approx 250 pixels).
+        int searchRadius = 50; // 50 bands * 5px = 250px neighborhood
+        int ignoreBands = (int)((rows * 0.10) / bandSize);
+
+        for (int i = ignoreBands; i < densities.size() - ignoreBands; i++) {
+            double currentDensity = densities.get(i);
+            boolean isLocalMin = true;
+
+            // Check neighborhood: Is there any spot significantly whiter nearby?
+            for (int j = Math.max(0, i - searchRadius); j < Math.min(densities.size(), i + searchRadius); j++) {
+                if (densities.get(j) < currentDensity) {
+                    isLocalMin = false;
+                    break;
                 }
             }
-            resT.release();
-            result.release();
+
+            // If this is the whitiest spot in 250px and it's actually quiet (< 3 stars)
+            if (isLocalMin && currentDensity < 0.05) {
+                int snapY = i * bandSize;
+                
+                // Prevent double-marking the same spot
+                if (snapPoints.isEmpty() || snapY - snapPoints.get(snapPoints.size()-1) > 200) {
+                    // Blue line for the TRUE trough
+                    Imgproc.line(source, new Point(0, snapY), new Point(cols, snapY), new Scalar(255, 0, 0), 4);
+                    snapPoints.add(snapY);
+                }
+            }
         }
+
+        System.out.println("Page " + currentPage + ": Filtered to " + snapPoints.size() + " true system breaks.");
+
         gray.release();
-        return yCoords;
+        thresh.release();
+        return snapPoints;
     }
 
     private void scrollToSystem(int index) {
         if (scrollPane.getContent() == null || systemTops.isEmpty()) return;
+        
         double vH = scrollPane.getHeight();
         double cH = scrollPane.getContent().getBoundsInLocal().getHeight();
         double targetY = systemTops.get(index);
-        double lift = vH * 0.10; // Apply the 10% lift for Xreal comfort
-        double scrollPos = (targetY - (vH / 2.0) - lift) / (cH - vH);
+        
+        // Offset to keep the system slightly below the top of the viewport
+        double offset = vH * 0.10;
+        double scrollPos = (targetY - offset) / (cH - vH);
+        
         scrollPane.setVvalue(Math.max(0, Math.min(1.0, scrollPos)));
     }
 
@@ -228,19 +230,5 @@ public class MainApp extends Application {
         BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_3BYTE_BGR);
         System.arraycopy(source, 0, ((DataBufferByte) image.getRaster().getDataBuffer()).getData(), 0, source.length);
         return image;
-    }
-
-    private void applyBaroqueBackground(StackPane root) {
-        try {
-            // Ensure music_stand_bg.jpg is in src/main/resources
-            Image standImg = new Image(getClass().getResourceAsStream("/music_stand_bg.jpg"));
-            ImageView standView = new ImageView(standImg);
-            standView.setPreserveRatio(true);
-            standView.fitWidthProperty().bind(root.widthProperty());
-            root.getChildren().add(0, standView);
-            root.setStyle("-fx-background-color: black;");
-        } catch (Exception e) {
-            System.err.println("Background image not found.");
-        }
     }
 }
