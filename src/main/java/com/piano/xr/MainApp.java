@@ -119,11 +119,14 @@ public class MainApp extends Application {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    private List<Integer> findSystemsViaHough(Mat source) {
-        List<Integer> snapPoints = new ArrayList<>();
+    private List<Integer> findSystemsViaNeighborhood(Mat source) {
+        List<Integer> snaps = new ArrayList<>();
+        
+        // EXPLICIT TOP SNAP: Always start at the top of the page
+        snaps.add(10); 
+
         Mat gray = new Mat();
         Mat thresh = new Mat();
-        
         Imgproc.cvtColor(source, gray, Imgproc.COLOR_BGR2GRAY);
         Imgproc.threshold(gray, thresh, 200, 255, Imgproc.THRESH_BINARY_INV);
 
@@ -131,6 +134,7 @@ public class MainApp extends Application {
         int cols = thresh.cols();
         int bandSize = 5;
         
+        // Generate Density Profile
         List<Double> densities = new ArrayList<>();
         for (int y = 0; y < rows - bandSize; y += bandSize) {
             double bandSum = 0;
@@ -144,17 +148,14 @@ public class MainApp extends Application {
             densities.add(bandSum / bandSize);
         }
 
-        // STEP 2: Find the "Global" Minimums
-        // We search for troughs but only keep the one that is the "whitiest"
-        // in its immediate neighborhood (approx 250 pixels).
-        int searchRadius = 50; // 50 bands * 5px = 250px neighborhood
+        // Neighborhood Search for Troughs
+        int searchRadius = 50; 
         int ignoreBands = (int)((rows * 0.10) / bandSize);
 
         for (int i = ignoreBands; i < densities.size() - ignoreBands; i++) {
             double currentDensity = densities.get(i);
             boolean isLocalMin = true;
 
-            // Check neighborhood: Is there any spot significantly whiter nearby?
             for (int j = Math.max(0, i - searchRadius); j < Math.min(densities.size(), i + searchRadius); j++) {
                 if (densities.get(j) < currentDensity) {
                     isLocalMin = false;
@@ -162,24 +163,23 @@ public class MainApp extends Application {
                 }
             }
 
-            // If this is the whitiest spot in 250px and it's actually quiet (< 3 stars)
+            // Snap to the center of the whitest troughs
             if (isLocalMin && currentDensity < 0.05) {
                 int snapY = i * bandSize;
-                
-                // Prevent double-marking the same spot
-                if (snapPoints.isEmpty() || snapY - snapPoints.get(snapPoints.size()-1) > 200) {
-                    // Blue line for the TRUE trough
-                    Imgproc.line(source, new Point(0, snapY), new Point(cols, snapY), new Scalar(255, 0, 0), 4);
-                    snapPoints.add(snapY);
+                // Ensure we aren't doubling up on the top snap or previous markers
+                if (snapY - snaps.get(snaps.size()-1) > 250) {
+                    snaps.add(snapY);
                 }
             }
         }
 
-        System.out.println("Page " + currentPage + ": Filtered to " + snapPoints.size() + " true system breaks.");
+        // DRAWING: Only blue lines in the troughs
+        for (Integer yPos : snaps) {
+            Imgproc.line(source, new Point(0, yPos), new Point(cols, yPos), new Scalar(255, 0, 0), 4);
+        }
 
-        gray.release();
-        thresh.release();
-        return snapPoints;
+        gray.release(); thresh.release();
+        return snaps;
     }
 
     private void scrollToSystem(int index) {
