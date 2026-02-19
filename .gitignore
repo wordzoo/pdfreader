@@ -12,7 +12,7 @@
 .idea/
 *.iml
 *.iws
-
+**/*.lst
 # OS specific
 .DS_Store
 Thumbs.db
