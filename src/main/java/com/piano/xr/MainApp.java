@@ -226,22 +226,28 @@ public class MainApp extends Application {
         }
     }
 
+ // Replace the saveSnaps method in MainApp.java with this:
     private void saveSnaps() {
         File txtFile = getTxtFile(currentPdfFile);
         try (PrintWriter out = new PrintWriter(txtFile)) {
-            // Iterate through the map to save page:y format
-            for (int p = 0; p < document.getNumberOfPages(); p++) {
+            // 1. Sort the pages so the performance follows the book order
+            List<Integer> sortedPages = new ArrayList<>(allPagesSnaps.keySet());
+            Collections.sort(sortedPages);
+
+            for (Integer p : sortedPages) {
                 List<Integer> snaps = allPagesSnaps.get(p);
                 if (snaps != null) {
+                    // 2. Sort the Y-coordinates within each page
+                    Collections.sort(snaps);
                     for (Integer s : snaps) {
-                        out.println(p + ":" + s); // Page Index : Y Coordinate
+                        out.println(p + ":" + s); 
                     }
                 }
             }
             
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setHeaderText("Save Successful");
-            alert.setContentText("Full mapping saved in page:y format.");
+            alert.setHeaderText("Data Refined & Saved");
+            alert.setContentText("Mapping saved in chronological page:y format.");
             alert.showAndWait();
         } catch (Exception e) { e.printStackTrace(); }
     }

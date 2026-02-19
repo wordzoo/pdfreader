@@ -3,9 +3,7 @@ package com.piano.xr;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
-import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
@@ -18,18 +16,20 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class PerformanceView extends Application {
     private File pdfFile, txtFile;
     private PDDocument document;
-    private List<String> rawSnaps; // Stores "page:y" strings
-    private ScrollPane scrollPane;
+    private List<String> rawSnaps; 
     private int currentIndex = 0;
     private int currentLoadedPage = -1;
     private PDFRenderer renderer;
+    
+    private ImageView bgImageView = new ImageView();
     private ImageView pdfImageView = new ImageView();
+    private Pane musicClipPane = new Pane(); 
 
     public PerformanceView(File pdf, File txt) {
         this.pdfFile = pdf;
@@ -40,45 +40,48 @@ public class PerformanceView extends Application {
     public void start(Stage stage) throws Exception {
         document = PDDocument.load(pdfFile);
         renderer = new PDFRenderer(document);
-        rawSnaps = Files.readAllLines(txtFile.toPath());
+        rawSnaps = Files.readAllLines(txtFile.toPath()).stream()
+                        .filter(l -> l.contains(":"))
+                        .collect(Collectors.toList());
 
         StackPane root = new StackPane();
-        
-        // FIX: Fit Width Background
+        double screenWidth = Screen.getPrimary().getBounds().getWidth();
+        double screenHeight = Screen.getPrimary().getBounds().getHeight();
+
+        // 1. YOUR FIXED BACKGROUND: Fit Width, Preserve Ratio
         try {
             Image bgImg = new Image(getClass().getResourceAsStream("/music_stand_bg.jpg"));
-            BackgroundSize bgSize = new BackgroundSize(100, 100, true, true, false, false);
-            root.setBackground(new Background(new BackgroundImage(bgImg, 
-                BackgroundRepeat.NO_REPEAT, BackgroundRepeat.NO_REPEAT, 
-                BackgroundPosition.CENTER, bgSize)));
-        } catch (Exception e) { root.setStyle("-fx-background-color: #2c1b0e;"); }
+            bgImageView.setImage(bgImg);
+            bgImageView.setFitWidth(screenWidth);            
+            bgImageView.setPreserveRatio(true); 
+        } catch (Exception e) {
+            root.setStyle("-fx-background-color: #2c1b0e;");
+        }
 
-        scrollPane = new ScrollPane();
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        // 2. VIEWPORT: Fixed 1/3 height window
+        double viewportHeight = screenHeight / 3.0;
+        musicClipPane.setMaxSize(screenWidth, viewportHeight);
+        musicClipPane.setPrefSize(screenWidth, viewportHeight);
+        musicClipPane.setClip(new javafx.scene.shape.Rectangle(screenWidth, viewportHeight));
 
-        double screenHeight = Screen.getPrimary().getBounds().getHeight();
-        scrollPane.setMaxHeight(screenHeight / 3.0);
-        scrollPane.setPrefHeight(screenHeight / 3.0);
+        // 3. POSITIONING: Horizontal centering & Absolute Y shifting
+        musicClipPane.getChildren().add(pdfImageView);
+        pdfImageView.layoutXProperty().bind(musicClipPane.widthProperty().subtract(pdfImageView.fitWidthProperty()).divide(2));
 
-        VBox container = new VBox(pdfImageView);
-        container.setAlignment(Pos.CENTER);
-        scrollPane.setContent(container);
-        root.getChildren().add(scrollPane);
+        root.getChildren().addAll(bgImageView, musicClipPane);
 
         Scene scene = new Scene(root);
         scene.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.DOWN || e.getCode() == KeyCode.SPACE) jump(1);
-            if (e.getCode() == KeyCode.UP) jump(-1);
-            if (e.getCode() == KeyCode.ESCAPE) stage.close();
+            if (e.getCode() == KeyCode.DOWN || e.getCode() == KeyCode.SPACE || e.getCode() == KeyCode.RIGHT) jump(1);
+            else if (e.getCode() == KeyCode.UP || e.getCode() == KeyCode.LEFT) jump(-1);
+            else if (e.getCode() == KeyCode.ESCAPE) stage.close();
         });
 
         stage.setScene(scene);
         stage.setFullScreen(true);
         stage.show();
 
-        loadSnap(0);
+        if (!rawSnaps.isEmpty()) loadSnap(0);
     }
 
     private void jump(int dir) {
@@ -94,24 +97,19 @@ public class PerformanceView extends Application {
         int page = Integer.parseInt(parts[0]);
         int y = Integer.parseInt(parts[1]);
 
-        // Only re-render if we actually changed pages
         if (page != currentLoadedPage) {
             try {
                 currentLoadedPage = page;
                 BufferedImage bImage = renderer.renderImageWithDPI(page, 150);
                 pdfImageView.setImage(SwingFXUtils.toFXImage(bImage, null));
                 pdfImageView.setPreserveRatio(true);
-                pdfImageView.setFitWidth(Screen.getPrimary().getBounds().getWidth() - 300);
+                pdfImageView.setFitWidth(Screen.getPrimary().getBounds().getWidth() - 400);
             } catch (Exception e) { e.printStackTrace(); }
         }
 
-        // Apply Flush-Top Scroll Math
+        // 4. FLUSH TOP: Absolute Y translation
         Platform.runLater(() -> {
-            double cH = scrollPane.getContent().getBoundsInLocal().getHeight();
-            double vH = scrollPane.getViewportBounds().getHeight();
-            double scrollRange = cH - vH;
-            double scrollPos = (scrollRange > 0) ? (double)y / scrollRange : 0;
-            scrollPane.setVvalue(Math.max(0, Math.min(1.0, scrollPos)));
+            pdfImageView.setLayoutY(-y); 
         });
     }
 }
