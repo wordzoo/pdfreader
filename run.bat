@@ -13,7 +13,7 @@ call mvn clean install -DskipTests
 :: 4. Launch only if the build succeeded
 if %ERRORLEVEL% EQU 0 (
     echo Build Successful! Launching Stave Reader...
-    "c:\jdk-17\bin\java.exe" -jar target\stave-reader-1.0.0.jar "C:\BWV 915.pdf"
+    "c:\jdk-17\bin\java.exe" -jar target\stave-reader-1.0.0.jar "C:\temp\pdfs\BWV 915.pdf"
 ) else (
     echo.
     echo BUILD FAILED! Check the Maven errors above.

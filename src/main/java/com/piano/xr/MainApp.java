@@ -3,14 +3,20 @@ package com.piano.xr;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
@@ -25,9 +31,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.io.File;
 import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class MainApp extends Application {
     static { try { OpenCV.loadLocally(); } catch (Throwable e) { OpenCV.loadShared(); } }
@@ -36,12 +40,15 @@ public class MainApp extends Application {
     private PDFRenderer renderer;
     private File currentPdfFile;
     private int currentPage = 0;
-    private List<Integer> systemSnaps = new ArrayList<>();
+    
+    private Map<Integer, List<Integer>> allPagesSnaps = new HashMap<>();
     
     private ScrollPane scrollPane;
     private ImageView pdfImageView = new ImageView();
     private Canvas lineCanvas = new Canvas();
     private Integer selectedLineIndex = null;
+    private Pane container;
+    private Label pageLabel = new Label();
 
     @Override
     public void start(Stage stage) throws Exception {
@@ -61,21 +68,61 @@ public class MainApp extends Application {
     }
 
     private void setupEditorUI(Stage stage) {
+        StackPane root = new StackPane();
         scrollPane = new ScrollPane();
         scrollPane.setFitToWidth(true);
         
-        // Use a Pane to layer Canvas on top of ImageView
-        Pane container = new Pane(pdfImageView, lineCanvas);
+        container = new Pane(pdfImageView, lineCanvas);
         scrollPane.setContent(container);
+
+        // TOP CONTROLS (Save/Exit)
+        HBox topControls = new HBox(15);
+        topControls.setPadding(new Insets(20));
+        topControls.setPickOnBounds(false);
+
+        Button saveBtn = new Button("SAVE ALL");
+        saveBtn.setStyle("-fx-background-color: #2ecc71; -fx-text-fill: white; -fx-font-weight: bold;");
+        saveBtn.setOnAction(e -> saveSnaps());
+
+        Button exitBtn = new Button("EXIT");
+        exitBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;");
+        exitBtn.setOnAction(e -> stage.close());
+
+        topControls.getChildren().addAll(saveBtn, exitBtn);
+
+        // BOTTOM CONTROLS (Paging)
+        HBox bottomControls = new HBox(20);
+        bottomControls.setPadding(new Insets(20));
+        bottomControls.setAlignment(Pos.CENTER);
+        bottomControls.setPickOnBounds(false);
+        bottomControls.setStyle("-fx-background-color: rgba(0,0,0,0.5); -fx-background-radius: 10;");
+        bottomControls.setMaxWidth(300);
+        bottomControls.setMaxHeight(60);
+
+        Button prevBtn = new Button("< PREV");
+        prevBtn.setStyle("-fx-font-weight: bold;");
+        prevBtn.setOnAction(e -> navigatePage(-1));
+
+        Button nextBtn = new Button("NEXT >");
+        nextBtn.setStyle("-fx-font-weight: bold;");
+        nextBtn.setOnAction(e -> navigatePage(1));
+
+        pageLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+        
+        bottomControls.getChildren().addAll(prevBtn, pageLabel, nextBtn);
+        
+        root.getChildren().addAll(scrollPane, topControls, bottomControls);
+        StackPane.setAlignment(topControls, Pos.TOP_LEFT);
+        StackPane.setAlignment(bottomControls, Pos.BOTTOM_CENTER);
+        StackPane.setMargin(bottomControls, new Insets(0, 0, 40, 0));
 
         setupMouseEvents(container);
 
-        Scene scene = new Scene(new StackPane(scrollPane));
+        Scene scene = new Scene(root);
         scene.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.S) saveSnaps();
-            if (e.getCode() == KeyCode.ESCAPE) stage.close();
             if (e.getCode() == KeyCode.RIGHT) navigatePage(1);
             if (e.getCode() == KeyCode.LEFT) navigatePage(-1);
+            if (e.getCode() == KeyCode.S) saveSnaps();
         });
 
         stage.setScene(scene);
@@ -90,24 +137,22 @@ public class MainApp extends Application {
 
         container.setOnMouseClicked(e -> {
             if (e.getButton() == MouseButton.PRIMARY && e.getClickCount() == 2) {
-                toggleSnap((int) e.getY());
+                toggleSnap(e.getY());
             }
         });
 
-        container.setOnMousePressed(e -> {
-            selectedLineIndex = findSelectedLineIndex(e.getY());
-        });
+        container.setOnMousePressed(e -> selectedLineIndex = findSelectedLineIndex(e.getY()));
 
         container.setOnMouseDragged(e -> {
             if (selectedLineIndex != null) {
-                systemSnaps.set(selectedLineIndex, (int) e.getY());
-                drawLines(); // Only redraw the canvas, not the image
+                allPagesSnaps.get(currentPage).set(selectedLineIndex, (int) e.getY());
+                drawLines();
             }
         });
 
         container.setOnMouseReleased(e -> {
             if (selectedLineIndex != null) {
-                Collections.sort(systemSnaps);
+                Collections.sort(allPagesSnaps.get(currentPage));
                 selectedLineIndex = null;
                 drawLines();
             }
@@ -123,22 +168,23 @@ public class MainApp extends Application {
     private void loadPage(int pageIndex) {
         try {
             currentPage = pageIndex;
+            pageLabel.setText("Page " + (currentPage + 1) + " / " + document.getNumberOfPages());
+            
             BufferedImage bImage = renderer.renderImageWithDPI(pageIndex, 150);
             
-            // Auto-detect if fresh page
-            if (systemSnaps.isEmpty()) {
+            if (!allPagesSnaps.containsKey(currentPage)) {
                 Mat mat = bufferedImageToMat(bImage);
-                systemSnaps = findSystemsViaNeighborhood(mat);
+                allPagesSnaps.put(currentPage, findSystemsViaNeighborhood(mat));
                 mat.release();
             }
 
             Image fxImage = SwingFXUtils.toFXImage(bImage, null);
             pdfImageView.setImage(fxImage);
-            
             lineCanvas.setWidth(fxImage.getWidth());
             lineCanvas.setHeight(fxImage.getHeight());
             
             drawLines();
+            scrollPane.setVvalue(0);
         } catch (Exception e) { e.printStackTrace(); }
     }
 
@@ -147,50 +193,63 @@ public class MainApp extends Application {
         gc.clearRect(0, 0, lineCanvas.getWidth(), lineCanvas.getHeight());
         gc.setStroke(Color.BLUE);
         gc.setLineWidth(4);
-        for (Integer y : systemSnaps) {
-            gc.strokeLine(0, y, lineCanvas.getWidth(), y);
+        List<Integer> currentSnaps = allPagesSnaps.get(currentPage);
+        if (currentSnaps != null) {
+            for (Integer y : currentSnaps) gc.strokeLine(0, y, lineCanvas.getWidth(), y);
         }
     }
 
     private void toggleSnap(double y) {
+        List<Integer> snaps = allPagesSnaps.get(currentPage);
         Integer found = findSelectedLineIndex(y);
-        if (found != null) systemSnaps.remove((int)found);
-        else systemSnaps.add((int)y);
-        Collections.sort(systemSnaps);
+        if (found != null) snaps.remove((int)found);
+        else snaps.add((int)y);
+        Collections.sort(snaps);
         drawLines();
     }
 
-    private boolean isOverLine(double y) {
-        return findSelectedLineIndex(y) != null;
-    }
-
     private Integer findSelectedLineIndex(double y) {
-        for (int i = 0; i < systemSnaps.size(); i++) {
-            if (Math.abs(systemSnaps.get(i) - y) < 20) return i;
+        List<Integer> snaps = allPagesSnaps.get(currentPage);
+        if (snaps == null) return null;
+        for (int i = 0; i < snaps.size(); i++) {
+            if (Math.abs(snaps.get(i) - y) < 20) return i;
         }
         return null;
     }
 
+    private boolean isOverLine(double y) { return findSelectedLineIndex(y) != null; }
+
     private void navigatePage(int dir) {
         int next = currentPage + dir;
         if (next >= 0 && next < document.getNumberOfPages()) {
-            systemSnaps.clear(); // Clear for new page detection
             loadPage(next);
         }
     }
 
     private void saveSnaps() {
-        try (PrintWriter out = new PrintWriter(getTxtFile(currentPdfFile))) {
-            for (Integer s : systemSnaps) out.println(s);
-            System.out.println("Saved Mapping!");
+        File txtFile = getTxtFile(currentPdfFile);
+        try (PrintWriter out = new PrintWriter(txtFile)) {
+            for (int p = 0; p < document.getNumberOfPages(); p++) {
+                List<Integer> snaps = allPagesSnaps.get(p);
+                if (snaps == null) {
+                    BufferedImage b = renderer.renderImageWithDPI(p, 150);
+                    Mat m = bufferedImageToMat(b);
+                    snaps = findSystemsViaNeighborhood(m);
+                    m.release();
+                }
+                for (Integer s : snaps) out.println(s);
+            }
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setHeaderText("Save Successful");
+            alert.setContentText("Full mapping saved for " + document.getNumberOfPages() + " pages.");
+            alert.showAndWait();
         } catch (Exception e) { e.printStackTrace(); }
     }
 
     private File getTxtFile(File pdf) {
-        return new File(pdf.getAbsolutePath().replace(".pdf", ".txt"));
+        String path = pdf.getAbsolutePath();
+        return new File(path.substring(0, path.lastIndexOf('.')) + ".txt");
     }
-
-    // --- Utility Methods (OpenCV & Processing) ---
 
     private List<Integer> findSystemsViaNeighborhood(Mat source) {
         List<Integer> snaps = new ArrayList<>();
