@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 public class PerformanceView extends Application {
     // 10 pixels lowers the scroll point; negative values raise it.
-    private static final int FLUSH_TOP_OFFSET = 10; 
+    private static final int FLUSH_TOP_OFFSET = 30; 
 
     private File pdfFile, txtFile;
     private PDDocument document;
