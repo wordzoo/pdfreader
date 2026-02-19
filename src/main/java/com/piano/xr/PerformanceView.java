@@ -20,6 +20,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class PerformanceView extends Application {
+    // 10 pixels lowers the scroll point; negative values raise it.
+    private static final int FLUSH_TOP_OFFSET = 10; 
+
     private File pdfFile, txtFile;
     private PDDocument document;
     private List<String> rawSnaps; 
@@ -48,7 +51,7 @@ public class PerformanceView extends Application {
         double screenWidth = Screen.getPrimary().getBounds().getWidth();
         double screenHeight = Screen.getPrimary().getBounds().getHeight();
 
-        // 1. YOUR FIXED BACKGROUND: Fit Width, Preserve Ratio
+        // Background: Your fixed logic for Fit Width and Preserved Ratio
         try {
             Image bgImg = new Image(getClass().getResourceAsStream("/music_stand_bg.jpg"));
             bgImageView.setImage(bgImg);
@@ -58,13 +61,13 @@ public class PerformanceView extends Application {
             root.setStyle("-fx-background-color: #2c1b0e;");
         }
 
-        // 2. VIEWPORT: Fixed 1/3 height window
+        // Viewport: 1/3 monitor height
         double viewportHeight = screenHeight / 3.0;
         musicClipPane.setMaxSize(screenWidth, viewportHeight);
         musicClipPane.setPrefSize(screenWidth, viewportHeight);
         musicClipPane.setClip(new javafx.scene.shape.Rectangle(screenWidth, viewportHeight));
 
-        // 3. POSITIONING: Horizontal centering & Absolute Y shifting
+        // Absolute Positioning & Horizontal Centering
         musicClipPane.getChildren().add(pdfImageView);
         pdfImageView.layoutXProperty().bind(musicClipPane.widthProperty().subtract(pdfImageView.fitWidthProperty()).divide(2));
 
@@ -107,9 +110,10 @@ public class PerformanceView extends Application {
             } catch (Exception e) { e.printStackTrace(); }
         }
 
-        // 4. FLUSH TOP: Absolute Y translation
+        // Apply Flush Top with Offset Constant
         Platform.runLater(() -> {
-            pdfImageView.setLayoutY(-y); 
+            // Negative 'y' moves content up; adding the offset pushes it back down.
+            pdfImageView.setLayoutY(-y + FLUSH_TOP_OFFSET); 
         });
     }
 }
