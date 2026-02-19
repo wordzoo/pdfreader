@@ -229,19 +229,19 @@ public class MainApp extends Application {
     private void saveSnaps() {
         File txtFile = getTxtFile(currentPdfFile);
         try (PrintWriter out = new PrintWriter(txtFile)) {
+            // Iterate through the map to save page:y format
             for (int p = 0; p < document.getNumberOfPages(); p++) {
                 List<Integer> snaps = allPagesSnaps.get(p);
-                if (snaps == null) {
-                    BufferedImage b = renderer.renderImageWithDPI(p, 150);
-                    Mat m = bufferedImageToMat(b);
-                    snaps = findSystemsViaNeighborhood(m);
-                    m.release();
+                if (snaps != null) {
+                    for (Integer s : snaps) {
+                        out.println(p + ":" + s); // Page Index : Y Coordinate
+                    }
                 }
-                for (Integer s : snaps) out.println(s);
             }
+            
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
             alert.setHeaderText("Save Successful");
-            alert.setContentText("Full mapping saved for " + document.getNumberOfPages() + " pages.");
+            alert.setContentText("Full mapping saved in page:y format.");
             alert.showAndWait();
         } catch (Exception e) { e.printStackTrace(); }
     }
