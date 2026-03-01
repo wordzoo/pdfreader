@@ -74,9 +74,7 @@ public class PerformanceView extends Application {
         stage.setScene(new Scene(root));
         stage.setFullScreen(true);
         stage.show();
-
-        // Load first page immediately
-        loadSnap(0); 
+        
         analyzePdf(document);
     }
 
@@ -99,20 +97,33 @@ public class PerformanceView extends Application {
             }
         };
 
-        analysisTask.setOnSucceeded(e -> { this.yPositions = analysisTask.getValue(); });
+        analysisTask.setOnSucceeded(e -> {
+            this.yPositions = analysisTask.getValue();
+            System.out.println("Total systems found: " + yPositions.size());
+            
+            // Only load the first snap if we actually found something
+            if (yPositions != null && !yPositions.isEmpty()) {
+                loadSnap(0);
+            }
+        });
         new Thread(analysisTask).start();
     }
 
     private void loadSnap(int index) {
-        if (yPositions.isEmpty()) return;
         SnapPoint point = yPositions.get(index);
-        if (point.page != currentLoadedPage) {
-            try {
-                currentLoadedPage = point.page;
-                BufferedImage bImage = renderer.renderImageWithDPI(point.page, 150);
+        System.out.println("Loading page: " + point.page); // 1. Is this being reached?
+
+        try {
+            BufferedImage bImage = renderer.renderImageWithDPI(point.page, 150);
+            System.out.println("BufferedImage created: " + (bImage != null)); // 2. Did rendering work?
+            
+            Platform.runLater(() -> {
                 pdfImageView.setImage(SwingFXUtils.toFXImage(bImage, null));
-            } catch (Exception e) { e.printStackTrace(); }
+                pdfImageView.setVisible(true); // Ensure it's visible
+                System.out.println("ImageView updated."); // 3. Did UI update?
+            });
+        } catch (Exception e) { 
+            e.printStackTrace(); // Catch rendering errors
         }
-        Platform.runLater(() -> pdfImageView.setLayoutY(-point.y + FLUSH_TOP_OFFSET));
     }
 }
