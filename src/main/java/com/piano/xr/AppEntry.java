@@ -6,6 +6,6 @@ public class AppEntry {
     public static void main(String[] args) {
         // We call the JavaFX launch from here. 
         // This hides the Application class from the initial JVM boot.
-        Application.launch(MainApp.class, args);
+        Application.launch(PerformanceView.class, args);
     }
 }
