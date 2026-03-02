@@ -8,6 +8,7 @@ import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
@@ -44,12 +45,18 @@ public class PerformanceView extends Application {
     private int currentIndex = 0;
     private int currentLoadedPage = -1;
 
+    
+ // Class-level field makes it visible to both start() and analyzePdf()
+    private Task<List<SnapPoint>> analysisTask;
+    private Label statusLabel = new Label("Waiting to start...");
+    
     public static void main(String[] args) {
         launch(args);
     }
 
     @Override
     public void start(Stage stage) throws Exception {
+    	
         FileChooser fileChooser = new FileChooser();
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PDF Files", "*.pdf"));
         File pdfFile = fileChooser.showOpenDialog(stage);
@@ -71,20 +78,32 @@ public class PerformanceView extends Application {
         musicClipPane.getChildren().add(pdfImageView);
         root.getChildren().addAll(bgImageView, musicClipPane);
         
-        stage.setScene(new Scene(root));
-        stage.setFullScreen(true);
-        stage.show();
+        stage.setScene(new Scene(root));        
+        
+        
+        Label statusLabel = new Label("Initializing...");        
+    	statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-background-color: rgba(0,0,0,0.6); -fx-padding: 10;");
+    	root.getChildren().add(statusLabel); // Add to your StackPane
+
+    
+    	
+    	
+        //stage.show();
         
         analyzePdf(document);
     }
 
     private void analyzePdf(PDDocument document) {
-        Task<List<SnapPoint>> analysisTask = new Task<List<SnapPoint>>() {
+        this.analysisTask = new Task<List<SnapPoint>>() {
             @Override
             protected List<SnapPoint> call() throws Exception {
                 List<SnapPoint> combined = new ArrayList<>();
                 ObjectMapper mapper = new ObjectMapper();
+
                 for (int i = 0; i < document.getNumberOfPages(); i++) {
+                    String msg = "Finding systems on page " + (i + 1) + " of " + document.getNumberOfPages() + "...";
+                    updateMessage(msg);
+                    System.out.println(msg);
                     BufferedImage bImage = renderer.renderImageWithDPI(i, 150);
                     String json = visionService.analyzePage(bImage);
                     String clean = json.replaceAll("```json", "").replaceAll("```", "").trim();
@@ -93,22 +112,22 @@ public class PerformanceView extends Application {
                     List<Integer> pageY = mapper.readValue(mapper.readTree(systems.asText()).get("systems").toString(), new TypeReference<List<Integer>>(){});
                     for (Integer y : pageY) combined.add(new SnapPoint(i, y));
                 }
+                updateMessage("Analysis complete!");
                 return combined;
             }
         };
-
-        analysisTask.setOnSucceeded(e -> {
-            this.yPositions = analysisTask.getValue();
-            System.out.println("Total systems found: " + yPositions.size());
-            
-            // Only load the first snap if we actually found something
-            if (yPositions != null && !yPositions.isEmpty()) {
-                loadSnap(0);
-            }
+    	// Bind the label's text to the Task's message property
+    	statusLabel.textProperty().bind(analysisTask.messageProperty());
+    	
+        this.analysisTask.setOnSucceeded(e -> {
+            this.yPositions = this.analysisTask.getValue();
+            // Hide the status label when done
+            statusLabel.setVisible(false); 
+            if (!yPositions.isEmpty()) loadSnap(0);
         });
-        new Thread(analysisTask).start();
-    }
 
+        new Thread(this.analysisTask).start();
+    }
     private void loadSnap(int index) {
         SnapPoint point = yPositions.get(index);
         System.out.println("Loading page: " + point.page); // 1. Is this being reached?
