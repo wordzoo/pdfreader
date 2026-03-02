@@ -30,6 +30,10 @@
         <version>${javafx.version}</version>
     </dependency>
     <dependency>
+    <groupId>org.openjfx</groupId>
+    <artifactId>javafx-fxml</artifactId>
+    <version>23.0.2</version> </dependency>
+    <dependency>
         <groupId>org.openpnp</groupId>
         <artifactId>opencv</artifactId>
         <version>4.5.1-2</version>

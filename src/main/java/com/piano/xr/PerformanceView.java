@@ -23,7 +23,8 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
 // Helper to track page/y pairing
 class SnapPoint {
 	int page;
@@ -39,10 +40,9 @@ public class PerformanceView extends Application {
 	public static final boolean DEBUG = true;
 	private static final int FLUSH_TOP_OFFSET = 30;
 
-	private final GeminiVisionService visionService = new GeminiVisionService();
-	private final ImageView bgImageView = new ImageView();
-	private final ImageView pdfImageView = new ImageView();
-	private final Pane musicClipPane = new Pane();
+	@FXML private ImageView bgImageView;
+    @FXML private ImageView pdfImageView;
+    @FXML private Pane musicClipPane;
 
 	private PDDocument document; // Keep alive as class field
 	private PDFRenderer renderer;
@@ -60,34 +60,24 @@ public class PerformanceView extends Application {
 
 	@Override
 	public void start(Stage stage) throws Exception {
-	    // 1. Setup Root and background
-	    StackPane root = new StackPane();
+		// 1. Create the loader
+	    FXMLLoader loader = new FXMLLoader(getClass().getResource("/performance_view.fxml"));
 	    
+	    // 2. Set THIS class instance as the controller!
+	    // This forces the FXML loader to inject fields into YOUR current object
+	    loader.setController(this);
+	    StackPane root = loader.load();
+	    
+	    // 2. Setup Background Image
 	    Image bgImg = new Image(getClass().getResourceAsStream("/music_stand_bg.jpg"));
-	    
-	    // We explicitly calculate the rendered size once.
 	    double renderedHeight = Screen.getPrimary().getBounds().getHeight() / 4.0;
-	    // Calculate the corresponding width, preserving the image's ratio
 	    double aspectRatio = bgImg.getWidth() / bgImg.getHeight();
 	    double renderedWidth = renderedHeight * aspectRatio;
 	    
-	    try {
-	        bgImageView.setImage(bgImg);
-	        // We set the FIT dimensions, which are what matter.
-	        bgImageView.setFitWidth(renderedWidth);
-	        bgImageView.setFitHeight(renderedHeight);
-	        bgImageView.setPreserveRatio(true);
-	    } catch (Exception e) {
-	        root.setStyle("-fx-background-color: #2c1b0e;");
-	    }
-	    root.getChildren().add(bgImageView);
-
-	    // 2. Setup the music display area (the Pane)
-	    musicClipPane.getChildren().add(pdfImageView);
-	    
-	    // Position the Pane in the center of the StackPane
-	    StackPane.setAlignment(musicClipPane, javafx.geometry.Pos.CENTER);
-	    root.getChildren().add(musicClipPane);
+	    bgImageView.setImage(bgImg);
+	    bgImageView.setFitWidth(renderedWidth);
+	    bgImageView.setFitHeight(renderedHeight);
+	    bgImageView.setPreserveRatio(true);
 
 	    // 3. File Selection
 	    File pdfFile = DEBUG ? 
@@ -102,7 +92,7 @@ public class PerformanceView extends Application {
 	    this.document = PDDocument.load(pdfFile);
 	    this.renderer = new PDFRenderer(document);
 
-	    // 4. Scene Setup & Fixed Window sizing (matching the RENDERED background width/height)
+	    // 4. Scene Setup & Window sizing
 	    stage.setWidth(renderedWidth);
 	    stage.setHeight(renderedHeight);
 	    stage.setResizable(false);
@@ -110,23 +100,25 @@ public class PerformanceView extends Application {
 	    Scene scene = new Scene(root, renderedWidth, renderedHeight);
 	    stage.setScene(scene);
 
-	    // 5. Explicitly apply the "90% PDF width" constraint.
-	    // We bind the pdfImageView to 90% of the musicClipPane's current width.
-	    pdfImageView.setPreserveRatio(true);
-	    pdfImageView.fitWidthProperty().bind(musicClipPane.widthProperty().multiply(0.9));
-	    
-	    // Optional: We force the Pane itself not to expand past 90%
-	    musicClipPane.setMaxWidth(renderedWidth * 0.9);
+	    // 5. Navigation
+	    scene.setOnKeyPressed(event -> {
+	        if (event.getCode() == KeyCode.DOWN && currentIndex < yPositions.size() - 1) loadSnap(++currentIndex);
+	        else if (event.getCode() == KeyCode.UP && currentIndex > 0) loadSnap(--currentIndex);
+	    });
 
+	    // 6. UI constraints
+	    musicClipPane.setMaxWidth(renderedWidth * 0.9);
+	    StackPane.setAlignment(musicClipPane, javafx.geometry.Pos.CENTER);
+
+	    // 7. Status Label (removed redundant text setting)
 	    Label statusLabel = new Label("Initializing...");
 	    statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-background-color: rgba(0,0,0,0.6); -fx-padding: 10;");
 	    root.getChildren().add(statusLabel);
 
 	    stage.show();
 
-	    // 6. Start Analysis
+	    // 8. Start Analysis
 	    analyzePdf(document);
-	    statusLabel.setText("");
 	}
 	public static class SystemData {
 	    public int page;
@@ -181,7 +173,7 @@ public class PerformanceView extends Application {
 					updateMessage("Analyzing page " + (i + 1) + " of " + document.getNumberOfPages() + "...");
 
 					BufferedImage bImage = renderer.renderImageWithDPI(i, 150);
-					String json = visionService.analyzePage(bImage);
+					String json = new GeminiVisionService().analyzePage(bImage);
 
 					// Check if API returned an error JSON
 					JsonNode root = mapper.readTree(json);
@@ -231,37 +223,20 @@ public class PerformanceView extends Application {
 
 		new Thread(this.analysisTask).start();
 	}
-
 	private void loadSnap(int index) {
-	    SnapPoint point = yPositions.get(index);
-	    int dpi = 150;
-	    int paddingPixels = (int) (1.0 * dpi / 2.54); 
+        SnapPoint point = yPositions.get(index);
+        try {
+            BufferedImage fullPage = renderer.renderImageWithDPI(point.page, 150);
+            int padding = (int) (1.0 * 150 / 2.54);
+            int cropHeight = Math.min(200 + (2 * padding), fullPage.getHeight() - point.y);
+            BufferedImage cropped = fullPage.getSubimage(0, Math.max(0, point.y - padding), fullPage.getWidth(), cropHeight);
 
-	    try {
-	        BufferedImage fullPage = renderer.renderImageWithDPI(point.page, dpi);
-	        
-	        // Define crop dimensions (maintaining your existing logic)
-	        int systemBottom = point.y + 200; 
-	        int cropHeight = Math.min(systemBottom - point.y + (2 * paddingPixels), fullPage.getHeight() - point.y);
-	        int cropY = Math.max(0, point.y - paddingPixels);
-	        
-	        BufferedImage cropped = fullPage.getSubimage(0, cropY, fullPage.getWidth(), cropHeight);
-
-	        Platform.runLater(() -> {
-	            pdfImageView.setImage(SwingFXUtils.toFXImage(cropped, null));
-	            
-	            // 1. Maintain aspect ratio so the music is not squashed
-	            pdfImageView.setPreserveRatio(true);
-	            
-	            // 2. Set width to 90% of the musicClipPane width
-	            pdfImageView.setFitWidth(musicClipPane.getWidth() * 0.9);
-	            
-	            // 3. Ensure the ImageView itself is positioned to center within its parent
-	            // This assumes pdfImageView is inside a StackPane or a centered Pane
-	            StackPane.setAlignment(pdfImageView, javafx.geometry.Pos.CENTER);
-	        });
-	    } catch (Exception e) {
-	        System.err.println("Rendering error at index " + index + ": " + e.getMessage());
-	    }
-	}
+            Platform.runLater(() -> {
+                pdfImageView.setImage(SwingFXUtils.toFXImage(cropped, null));
+                pdfImageView.setPreserveRatio(true);
+                // Bind to 90% of the pane width
+                pdfImageView.fitWidthProperty().bind(musicClipPane.widthProperty().multiply(0.9));
+            });
+        } catch (Exception e) { e.printStackTrace(); }
+    }
 }
