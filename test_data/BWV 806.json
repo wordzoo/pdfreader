@@ -1,0 +1,22 @@
+{
+  "systems": [
+    {"page": 0, "y_start": 45}, {"page": 0, "y_start": 340}, {"page": 0, "y_start": 635},
+    {"page": 1, "y_start": 45}, {"page": 1, "y_start": 330}, {"page": 1, "y_start": 625},
+    {"page": 2, "y_start": 45}, {"page": 2, "y_start": 320}, {"page": 2, "y_start": 615},
+    {"page": 3, "y_start": 45}, {"page": 3, "y_start": 340}, {"page": 3, "y_start": 635},
+    {"page": 4, "y_start": 45}, {"page": 4, "y_start": 340}, {"page": 4, "y_start": 635},
+    {"page": 5, "y_start": 45}, {"page": 5, "y_start": 340}, {"page": 5, "y_start": 635},
+    {"page": 6, "y_start": 45}, {"page": 6, "y_start": 340}, {"page": 6, "y_start": 635},
+    {"page": 7, "y_start": 45}, {"page": 7, "y_start": 340}, {"page": 7, "y_start": 635},
+    {"page": 8, "y_start": 45}, {"page": 8, "y_start": 340}, {"page": 8, "y_start": 635},
+    {"page": 9, "y_start": 45}, {"page": 9, "y_start": 340}, {"page": 9, "y_start": 635},
+    {"page": 10, "y_start": 45}, {"page": 10, "y_start": 340}, {"page": 10, "y_start": 635},
+    {"page": 11, "y_start": 45}, {"page": 11, "y_start": 340}, {"page": 11, "y_start": 635},
+    {"page": 12, "y_start": 45}, {"page": 12, "y_start": 340}, {"page": 12, "y_start": 635},
+    {"page": 13, "y_start": 45}, {"page": 13, "y_start": 340}, {"page": 13, "y_start": 635},
+    {"page": 14, "y_start": 45}, {"page": 14, "y_start": 340}, {"page": 14, "y_start": 635},
+    {"page": 15, "y_start": 45}, {"page": 15, "y_start": 340}, {"page": 15, "y_start": 635},
+    {"page": 16, "y_start": 45}, {"page": 16, "y_start": 340}, {"page": 16, "y_start": 635},
+    {"page": 17, "y_start": 45}, {"page": 17, "y_start": 340}, {"page": 17, "y_start": 635}
+  ]
+}
