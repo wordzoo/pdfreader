@@ -101,29 +101,50 @@ public class PerformanceView extends Application {
                 ObjectMapper mapper = new ObjectMapper();
 
                 for (int i = 0; i < document.getNumberOfPages(); i++) {
-                    String msg = "Finding systems on page " + (i + 1) + " of " + document.getNumberOfPages() + "...";
-                    updateMessage(msg);
-                    System.out.println(msg);
+                    updateMessage("Analyzing page " + (i + 1) + " of " + document.getNumberOfPages() + "...");
+                    
                     BufferedImage bImage = renderer.renderImageWithDPI(i, 150);
                     String json = visionService.analyzePage(bImage);
-                    String clean = json.replaceAll("```json", "").replaceAll("```", "").trim();
                     
-                    JsonNode systems = mapper.readTree(clean).at("/candidates/0/content/parts/0/text");
+                    // Check if API returned an error JSON
+                    JsonNode root = mapper.readTree(json);
+                    if (root.has("error")) {
+                        String status = root.at("/error/status").asText();
+                        if ("RESOURCE_EXHAUSTED".equals(status)) {
+                            throw new Exception("Quota exceeded! You've reached your free daily limit (20 requests). Please wait 24 hours or upgrade your billing plan.");
+                        }
+                        throw new Exception("API Error: " + root.at("/error/message").asText());
+                    }
+
+                    // Proceed with normal parsing
+                    String clean = json.replaceAll("```json", "").replaceAll("```", "").trim();                    
+                    JsonNode systems = root.at("/candidates/0/content/parts/0/text");
+                    
                     List<Integer> pageY = mapper.readValue(mapper.readTree(systems.asText()).get("systems").toString(), new TypeReference<List<Integer>>(){});
                     for (Integer y : pageY) combined.add(new SnapPoint(i, y));
+                    
+                    // Add a small delay to avoid hitting limits if you have a larger plan
+                    Thread.sleep(2000); 
                 }
-                updateMessage("Analysis complete!");
                 return combined;
             }
         };
-    	// Bind the label's text to the Task's message property
-    	statusLabel.textProperty().bind(analysisTask.messageProperty());
-    	
-        this.analysisTask.setOnSucceeded(e -> {
-            this.yPositions = this.analysisTask.getValue();
-            // Hide the status label when done
-            statusLabel.setVisible(false); 
+
+        statusLabel.textProperty().bind(analysisTask.messageProperty());
+
+        analysisTask.setOnSucceeded(e -> {
+            this.yPositions = analysisTask.getValue();
+            statusLabel.setVisible(false);
             if (!yPositions.isEmpty()) loadSnap(0);
+        });
+
+        analysisTask.setOnFailed(e -> {
+            Throwable ex = analysisTask.getException();
+            System.err.println("Task failed: " + ex.getMessage());
+            Platform.runLater(() -> {
+                statusLabel.setText("Error: " + ex.getMessage());
+                statusLabel.setStyle("-fx-text-fill: red; -fx-background-color: black;");
+            });
         });
 
         new Thread(this.analysisTask).start();
