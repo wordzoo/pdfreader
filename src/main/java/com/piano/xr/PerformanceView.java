@@ -224,19 +224,31 @@ public class PerformanceView extends Application {
 		new Thread(this.analysisTask).start();
 	}
 	private void loadSnap(int index) {
-        SnapPoint point = yPositions.get(index);
-        try {
-            BufferedImage fullPage = renderer.renderImageWithDPI(point.page, 150);
-            int padding = (int) (1.0 * 150 / 2.54);
-            int cropHeight = Math.min(200 + (2 * padding), fullPage.getHeight() - point.y);
-            BufferedImage cropped = fullPage.getSubimage(0, Math.max(0, point.y - padding), fullPage.getWidth(), cropHeight);
+	    SnapPoint point = yPositions.get(index);
+	    int dpi = 150;
+	    int standardPadding = (int) (1.0 * dpi / 2.54); 
 
-            Platform.runLater(() -> {
-                pdfImageView.setImage(SwingFXUtils.toFXImage(cropped, null));
-                pdfImageView.setPreserveRatio(true);
-                // Bind to 90% of the pane width
-                pdfImageView.fitWidthProperty().bind(musicClipPane.widthProperty().multiply(0.9));
-            });
-        } catch (Exception e) { e.printStackTrace(); }
-    }
+	    try {
+	        BufferedImage fullPage = renderer.renderImageWithDPI(point.page, dpi);
+	        
+	        // 1. Dynamic Padding: If we are close to the top, use less padding to trim white space.
+	        // If system starts within 50 pixels of the top, limit padding to 10 pixels.
+	        int dynamicPadding = (point.y < 50) ? 10 : standardPadding;
+
+	        int systemBottom = point.y + 200; 
+	        int cropHeight = Math.min(systemBottom - point.y + (2 * standardPadding), fullPage.getHeight() - point.y);
+	        int cropY = Math.max(0, point.y - dynamicPadding);
+	        
+	        BufferedImage cropped = fullPage.getSubimage(0, cropY, fullPage.getWidth(), cropHeight);
+
+	        Platform.runLater(() -> {
+	            pdfImageView.setImage(SwingFXUtils.toFXImage(cropped, null));
+	            pdfImageView.setPreserveRatio(true);
+	            // Ensure width binding is active
+	            pdfImageView.fitWidthProperty().bind(musicClipPane.widthProperty().multiply(0.9));
+	        });
+	    } catch (Exception e) {
+	        System.err.println("Rendering error at index " + index + ": " + e.getMessage());
+	    }
+	}
 }
